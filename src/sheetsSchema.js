@@ -1,4 +1,5 @@
 // Shared contract for the downloadable workbook and the Google Sheets adapter.
+import { validateOrderMaterials } from './orderMaterials.js';
 export const SHEET_SCHEMA = {
   Configuracion: ['clave', 'valor'],
   Telas: ['tela_id', 'nombre', 'tipo', 'ancho_util_cm', 'costo_metro', 'direccional', 'extra_json'],
@@ -54,7 +55,8 @@ export function toSheetTables(data, { revision = '', modifiedAt = '' } = {}) {
       for (const [sizeId, m] of Object.entries(pc.materialsBySize ?? {})) row('Variantes', [p.id, pc.id, sizeId, m.fabricId, m.colorId, extra(m, ['fabricId', 'colorId'])]);
     }
   }
-  for (const o of data.order) row('Pedido', [o.id, o.productId, o.sizeId, o.quantity, extra(o, ['id', 'productId', 'sizeId', 'quantity'])]);
+  // Keep existing columns: order designs/assignments round-trip through extra_json.
+  for (const o of data.order) { validateOrderMaterials(o); row('Pedido', [o.id, o.productId, o.sizeId, o.quantity, extra(o, ['id', 'productId', 'sizeId', 'quantity'])]); }
   for (const [name, values] of Object.entries(result)) for (const valuesRow of values) if (valuesRow.some(v => String(v).length > 45000)) throw new Error(`Un campo en ${name} supera el tamaño permitido. Usa una imagen más pequeña o revisa extra_json.`);
   return result;
 }
@@ -100,6 +102,7 @@ export function fromSheetTables(tables) {
   for (const r of records.Medidas) { const pc = find(pieces, key(r.producto_id, r.pieza_id), 'Medidas'); requireSize(r.producto_id, r.talla_id); unique(`Medidas/${r.producto_id}/${r.pieza_id}`, r.talla_id); const m = { ...json(r.extra_json, 'Medidas'), length: number(r.largo_o_diametro_cm, 'Medidas/largo'), width: number(r.ancho_cm, 'Medidas/ancho', pc.shape === 'circle') }; if (m.length <= 0 || (pc.shape !== 'circle' && m.width <= 0)) throw new Error('Las medidas deben ser mayores que cero.'); pc.measures[r.talla_id] = m; }
   for (const r of records.Variantes) { const pc = find(pieces, key(r.producto_id, r.pieza_id), 'Variantes'); requireSize(r.producto_id, r.talla_id); unique(`Variantes/${r.producto_id}/${r.pieza_id}`, r.talla_id); pc.materialsBySize[r.talla_id] = { ...json(r.extra_json, 'Variantes'), fabricId: String(r.tela_id), colorId: String(r.color_id) }; }
   for (const r of records.Pedido) { unique('Pedido', r.linea_id); const quantity = number(r.unidades, 'Pedido/unidades'); if (!Number.isInteger(quantity) || quantity < 1) throw new Error('Las unidades del pedido deben ser enteros positivos.'); data.order.push({ ...json(r.extra_json, 'Pedido'), id: String(r.linea_id), productId: String(r.producto_id), sizeId: String(r.talla_id), quantity }); }
+  for (const line of data.order) validateOrderMaterials(line);
   for (const p of data.products) for (const pc of p.pieces) for (const s of p.sizes) {
     if (!pc.measures[s.id]) throw new Error(`Faltan las medidas de ${pc.name} para la talla ${s.name}.`);
   }

@@ -550,6 +550,47 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   .toast { bottom: 72px; font-size: 8px; }
 }
 
+.order-materials-editor { margin: 20px 0; }
+.order-materials-editor .form-section-head { margin-bottom: 12px; }
+.order-design-card { border: 1px solid #e4e5dc; border-radius: 12px; margin-bottom: 12px; background: #fffefa; overflow: hidden; }
+.order-design-card > summary { padding: 14px; cursor: pointer; color: #405344; font-size: 12px; }
+.order-design-card > summary > span { display: block; margin: 6px 0 0 15px; font-size: 10px; color: #777e72; }
+.order-design-body { padding: 0 14px 14px; }
+.order-design-top { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
+.order-design-top .field { flex: 1 1 200px; }
+.order-design-top .text-button { display: inline-flex; align-items: center; gap: 5px; padding: 9px 0; }
+.order-design-help { color: #777e72; font-size: 11px; line-height: 1.6; margin: 10px 0; }
+.order-batch-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 12px; background: #f3f5ee; border-radius: 8px; }
+.order-batch-toolbar > span { flex: 1 1 100%; font-size: 11px; color: #64705e; }
+.order-material-select { min-width: 0; max-width: 100%; border: 1px solid #dedfd5; background: #fffefa; border-radius: 7px; padding: 9px; font-size: 11px; color: #405344; min-height: 38px; }
+.order-batch-toolbar .order-material-select { flex: 1 1 220px; }
+.order-material-group { border: 1px solid #e4e5dc; border-radius: 9px; overflow: hidden; margin-top: 12px; }
+.order-material-group-head, .order-material-piece-head, .order-section-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(180px, 1fr); align-items: center; gap: 12px; }
+.order-material-group-head { background: #f2f4ed; padding: 12px; }
+.order-material-group-head strong, .order-piece-check strong, .order-section-row strong { font-size: 12px; color: #405344; }
+.order-material-group-head small, .order-piece-check small { display: block; color: #818779; font-size: 10px; margin-top: 4px; }
+.order-material-piece { padding: 12px; border-top: 1px solid #e8e9e0; }
+.order-piece-check { display: flex; align-items: center; gap: 8px; cursor: pointer; min-width: 0; }
+.order-piece-check input { accent-color: #405344; width: 17px; height: 17px; flex-shrink: 0; }
+.order-material-preview { display: flex; align-items: center; gap: 6px; color: #75806b; font-size: 10px; line-height: 1.6; margin-top: 8px; }
+.order-material-preview i { width: 12px; height: 12px; border-radius: 3px; border: 1px solid #0002; flex-shrink: 0; }
+.order-material-preview.missing, .order-material-warning { color: #a05634; }
+.order-material-warning { font-size: 11px; }
+.order-section-details { margin-top: 10px; }
+.order-section-details > summary { color: #60745c; font-size: 11px; cursor: pointer; padding: 5px 0; }
+.order-section-row { padding: 10px 0; border-top: 1px dashed #e2e4d8; }
+.piece-group-field { margin: 12px 0; }
+.piece-group-field > small { color: #8b9085; font-size: 10px; line-height: 1.5; }
+@media (max-width: 900px) {
+  .order-material-group-head, .order-material-piece-head, .order-section-row { grid-template-columns: 1fr; gap: 8px; }
+}
+@media (max-width: 680px) {
+  .order-design-body { padding: 0 10px 10px; }
+  .order-design-card > summary { padding: 12px 10px; }
+  .order-materials-editor .field input, .order-materials-editor .order-material-select { font-size: 13px; min-height: 42px; }
+  .order-design-help { font-size: 11px; }
+}
+
 @media print {
   body { background: white; padding: 0 !important; }
   .sidebar, .topbar, .mobile-nav, .module-intro, .cut-group-tabs, .cut-content-grid, .cut-piece-list-panel, .alert-box, .toast { display: none !important; }

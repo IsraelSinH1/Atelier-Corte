@@ -1,13 +1,13 @@
+import { resolveMaterialIds } from './orderMaterials.js';
+
 const uid = () => globalThis.crypto?.randomUUID?.() ?? `id-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
 function findColor(fabrics, fabricId, colorId) {
   return fabrics.find(f => f.id === fabricId)?.colors?.find(c => c.id === colorId);
 }
 
-export function materialFor(piece, sizeId, fabrics) {
-  const override = piece.materialsBySize?.[sizeId];
-  const fabricId = override?.fabricId || piece.fabricId;
-  const colorId = override?.colorId || piece.colorId;
+export function materialFor(piece, sizeId, fabrics, line, sectionIndex) {
+  const { fabricId, colorId } = resolveMaterialIds(piece, sizeId, line, sectionIndex);
   const fabric = fabrics.find(f => f.id === fabricId);
   const color = findColor(fabrics, fabricId, colorId);
   return { fabricId, colorId, fabric, color };
@@ -41,12 +41,12 @@ function expandOrder(products, fabrics, order, gap) {
   for (const line of order) {
     const product = products.find(p => p.id === line.productId);
     const size = product?.sizes?.find(s => s.id === line.sizeId);
-    if (!product || !size || line.quantity <= 0) continue;
+    if (!product || !size) { issues.push('Un renglón del pedido apunta a un producto o talla inexistente.'); continue; }
+    if (!Number.isInteger(Number(line.quantity)) || Number(line.quantity) < 1) { issues.push(`Las unidades de ${product.name} deben ser enteros positivos.`); continue; }
     for (const piece of product.pieces ?? []) {
       const measurement = piece.measures?.[size.id];
-      const { fabric, color, fabricId, colorId } = materialFor(piece, size.id, fabrics);
-      if (!measurement || !fabric || !color) {
-        issues.push(`Falta asignar medida, tela o color a “${piece.name}” de ${product.name} (${size.name}).`);
+      if (!measurement) {
+        issues.push(`Falta asignar medida a “${piece.name}” de ${product.name} (${size.name}).`);
         continue;
       }
       const margin = Math.max(0, Number(piece.seamMode === 'global' ? product.globalMargin : piece.seam) || 0);
@@ -59,23 +59,46 @@ function expandOrder(products, fabrics, order, gap) {
       }
       const cutLength = length + margin * 2;
       const cutWidth = width + margin * 2;
-      const key = `${fabricId}::${colorId}`;
-      if (!groups.has(key)) groups.set(key, { key, fabric, color, items: [], sourceCounts: new Map() });
-      const group = groups.get(key);
-      const count = Math.max(1, Number(piece.quantity) || 1) * Math.max(1, Number(line.quantity) || 1);
-      group.sourceCounts.set(`${product.id}::${size.id}`, (group.sourceCounts.get(`${product.id}::${size.id}`) ?? 0) + count);
-      for (let i = 0; i < count; i++) {
-        group.items.push({
-          id: `${line.id}-${piece.id}-${i + 1}-${uid()}`, pieceId: piece.id, pieceName: piece.name,
-          productName: product.name, sizeName: size.name, shape: piece.shape, customPoints: piece.customPoints,
-          width: cutWidth, height: cutLength, bareWidth: cutWidth, bareHeight: cutLength,
-          seam: margin, gap, canRotate: Boolean(piece.canRotate) && !piece.respectDirection && !fabric.directional && !isCircle,
-          fill: color.hex, materialColor: color.name,
-        });
+      if (!Number.isInteger(Number(piece.quantity)) || Number(piece.quantity) < 1) { issues.push(`La cantidad de “${piece.name}” debe ser un entero positivo.`); continue; }
+      for (let sectionIndex = 0; sectionIndex < Number(piece.quantity); sectionIndex++) {
+        const { fabric, color, fabricId, colorId } = materialFor(piece, size.id, fabrics, line, sectionIndex);
+        const sectionName = Number(piece.quantity) > 1 ? `${piece.name} · sección ${sectionIndex + 1}` : piece.name;
+        if (!fabric || !color) {
+          issues.push(`Asigna tela y color a “${sectionName}” de ${product.name} (${size.name}${line.designName ? ` · ${line.designName}` : ''}).`);
+          continue;
+        }
+        const key = `${fabricId}::${colorId}`;
+        if (!groups.has(key)) groups.set(key, { key, fabric, color, items: [], sourceCounts: new Map() });
+        const group = groups.get(key);
+        const count = Number(line.quantity);
+        group.sourceCounts.set(`${product.id}::${size.id}`, (group.sourceCounts.get(`${product.id}::${size.id}`) ?? 0) + count);
+        for (let i = 0; i < count; i++) {
+          group.items.push({
+            id: `${line.id}-${piece.id}-${sectionIndex}-${i + 1}-${uid()}`, pieceId: piece.id, pieceName: sectionName,
+            orderLineId: line.id, sectionIndex, unitIndex: i, designName: line.designName || '',
+            productName: product.name, sizeName: size.name, shape: piece.shape, customPoints: piece.customPoints,
+            measureLength: length, measureWidth: width,
+            width: cutWidth, height: cutLength, bareWidth: cutWidth, bareHeight: cutLength,
+            seam: margin, gap, canRotate: Boolean(piece.canRotate) && !piece.respectDirection && !fabric.directional && !isCircle,
+            fill: color.hex, materialColor: color.name,
+          });
+        }
       }
     }
   }
   return { groups: [...groups.values()], issues };
+}
+
+// Uses the same expansion as nesting, including items too wide to be placed.
+export function cuttingList(products, fabrics, order, gap = 0) {
+  const expanded = expandOrder(products, fabrics, order, gap);
+  const rows = new Map();
+  for (const group of expanded.groups) for (const item of group.items) {
+    const key = JSON.stringify([item.orderLineId, item.pieceId, item.sectionIndex, group.key]);
+    if (!rows.has(key)) rows.set(key, { ...item, quantity: 0, fabricName: group.fabric.name, colorName: group.color.name });
+    rows.get(key).quantity++;
+  }
+  return [...rows.values()];
 }
 
 export function maxRects(items, rollWidth, gap) {
