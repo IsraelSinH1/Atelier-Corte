@@ -13,6 +13,8 @@ import OrderMaterials from './OrderMaterials.jsx';
 import { assignSection, changeOrderLine, patchSelectedSections } from './orderMaterials.js';
 import MaterialFields, { LayoutMaterialFields } from './MaterialFields.jsx';
 import CutMaterialBoard from './CutMaterialBoard.jsx';
+import { ProductCostOverview, ProductionOrderOverview } from './CostOverview.jsx';
+import { registerProduction } from './productionOrders.js';
 import { useSheetsSync } from './useSheetsSync.js';
 import { loadGoogleIdentity } from './sheetsClient.js';
 
@@ -179,6 +181,7 @@ function App() {
     const oldIds = new Map(clone.sizes.map(s => [s.id, uid()]));
     clone.id = uid(); clone.name = `${product.name} copia`;
     clone.sizes = clone.sizes.map(s => ({ ...s, id: oldIds.get(s.id) }));
+    if (clone.costsBySize) clone.costsBySize = Object.fromEntries(Object.entries(clone.costsBySize).filter(([id]) => oldIds.has(id)).map(([id, value]) => [oldIds.get(id), value]));
     clone.pieces = clone.pieces.map(piece => {
       const measurements = {};
       for (const [oldId, value] of Object.entries(piece.measures ?? {})) if (oldIds.has(oldId)) measurements[oldIds.get(oldId)] = { ...value };
@@ -201,6 +204,18 @@ function App() {
       const copy = { ...structuredClone(original), id: uid(), designName: original.designName ? `${original.designName} copia` : 'Nuevo diseño' };
       return { ...prev, order: [...prev.order, copy] };
     });
+  }
+  function setProductCost(productId, sizeId, field, value) {
+    update(prev => ({ ...prev, products: prev.products.map(p => p.id === productId ? { ...p, costsBySize: { ...p.costsBySize, [sizeId]: { ...p.costsBySize?.[sizeId], [field]: value } } } : p) }));
+  }
+  function registerOrder(options) {
+    const next = registerProduction(data, { ...options, plan });
+    // Persist before clearing the draft: storage failure leaves it intact.
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    setData(next); notify('Orden registrada en el histórico. Puedes preparar otro pedido.');
+  }
+  function changeProductionStatus(id, status) {
+    update(prev => ({ ...prev, productionHistory: (prev.productionHistory ?? []).map(record => record.id === id ? { ...record, status, updatedAt: new Date().toISOString() } : record) }));
   }
   function assignCutMaterials(targets, patch) {
     const order = patchSelectedSections(data.order, data.products, data.fabrics, targets, patch);
@@ -319,8 +334,8 @@ function App() {
       <div className="page-content">
         {tab === 'overview' && <Overview data={data} plan={plan} totalMeters={totalMeters} totalPieces={totalPieces} totalCost={totalCost} averageEfficiency={averageEfficiency} onGo={setTab} onOpenProduct={() => setModal({ type: 'product' })} />}
         {tab === 'fabrics' && <FabricsPage fabrics={data.fabrics} unit={data.unit} onAdd={() => setModal({ type: 'fabric' })} onEdit={fabric => setModal({ type: 'fabric', fabric })} onDelete={deleteFabric} />}
-        {tab === 'products' && <ProductsPage products={data.products} fabrics={data.fabrics} unit={data.unit} onAdd={() => setModal({ type: 'product' })} onEdit={product => setModal({ type: 'product', product })} onDuplicate={duplicateProduct} onDelete={deleteProduct} />}
-        {tab === 'production' && <ProductionPage data={data} plan={plan} totalMeters={totalMeters} totalPieces={totalPieces} totalCost={totalCost} onChange={changeOrderItem} onMaterials={changeOrderMaterials} onDuplicate={duplicateOrderLine} onAdd={addOrderLine} onRemove={id => update(prev => ({ ...prev, order: prev.order.filter(o => o.id !== id) }))} onGapChange={gap => update(prev => ({ ...prev, gap }))} onRecalculate={recalculate} onGoCut={() => setTab('cut')} onGoProducts={() => setTab('products')} />}
+        {tab === 'products' && <ProductsPage data={data} onCosts={setProductCost} products={data.products} fabrics={data.fabrics} unit={data.unit} onAdd={() => setModal({ type: 'product' })} onEdit={product => setModal({ type: 'product', product })} onDuplicate={duplicateProduct} onDelete={deleteProduct} />}
+        {tab === 'production' && <ProductionPage data={data} plan={plan} totalMeters={totalMeters} totalPieces={totalPieces} totalCost={totalCost} onRegister={registerOrder} onStatus={changeProductionStatus} onChange={changeOrderItem} onMaterials={changeOrderMaterials} onDuplicate={duplicateOrderLine} onAdd={addOrderLine} onRemove={id => update(prev => ({ ...prev, order: prev.order.filter(o => o.id !== id) }))} onGapChange={gap => update(prev => ({ ...prev, gap }))} onRecalculate={recalculate} onGoCut={() => setTab('cut')} onGoProducts={() => setTab('products')} />}
         {tab === 'cut' && <CutPage data={data} onAssignMaterials={assignCutMaterials} onResetMaterials={resetCutMaterials} plan={plan} selectedGroup={activePlanGroup} selectedPieceId={selectedPieceId} setSelectedPieceId={setSelectedPieceId} selectedGroupKey={selectedGroupKey} setSelectedGroupKey={setSelectedGroupKey} unit={data.unit} onMove={updatePlacement} onRecalculate={recalculate} onExportCsv={exportCsv} onExportSvg={exportSvg} onExportPng={exportPng} onPrint={printCutList} onGoProduction={() => setTab('production')} />}
         {tab === 'model' && <ModelPage data={data} unit={data.unit} activeProduct={activeProduct} activeSize={activeSize} activeProductId={activeProductId} modelSizeId={modelSizeId} selectedPieceId={selectedPieceId} setSelectedPieceId={selectModelPiece} onProductChange={id => { setActiveProductId(id); const product = data.products.find(p => p.id === id); setModelSizeId(product?.sizes[0]?.id ?? ''); }} onSizeChange={setModelSizeId} onGoCut={() => setTab('cut')} onGoProducts={() => setTab('products')} />}
       </div>
@@ -405,13 +420,14 @@ function FabricCard({ fabric, unit, onEdit, onDelete }) {
   </article>;
 }
 
-function ProductsPage({ products, fabrics, unit, onAdd, onEdit, onDuplicate, onDelete }) {
+function ProductsPage({ data, onCosts, products, fabrics, unit, onAdd, onEdit, onDuplicate, onDelete }) {
   const [query, setQuery] = useState('');
   const shown = products.filter(p => `${p.name} ${p.description}`.toLowerCase().includes(query.toLowerCase()));
   return <div className="module-page">
     <div className="module-intro"><div><div className="eyebrow">PRESETS REUTILIZABLES</div><h2>Productos de costura</h2><p>Define el patrón una vez y elige las telas y colores de cada diseño en Producción.</p></div><button className="button button-primary" onClick={onAdd}><Plus size={17} /> Crear producto</button></div>
     <div className="toolbar"><label className="search-field"><Filter size={16} /><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Buscar producto" /></label><span className="toolbar-count">{shown.length} {shown.length === 1 ? 'preset' : 'presets'}</span></div>
     {shown.length ? <div className="product-list">{shown.map(product => <ProductCard key={product.id} product={product} fabrics={fabrics} unit={unit} onEdit={() => onEdit(product)} onDuplicate={() => onDuplicate(product)} onDelete={() => onDelete(product.id)} />)}</div> : <EmptyState title="Aún no hay productos guardados" text="Crea un preset con sus tallas y piezas para empezar a planear producción." action="Crear producto" onClick={onAdd} />}
+    {shown.map(product => <ProductCostOverview key={product.id} product={product} data={data} onCosts={onCosts} />)}
   </div>;
 }
 
@@ -428,7 +444,7 @@ function ProductCard({ product, fabrics, unit, onEdit, onDuplicate, onDelete }) 
   </article>;
 }
 
-function ProductionPage({ data, plan, totalMeters, totalPieces, totalCost, onChange, onMaterials, onDuplicate, onAdd, onRemove, onGapChange, onRecalculate, onGoCut, onGoProducts }) {
+function ProductionPage({ data, plan, totalMeters, totalPieces, totalCost, onRegister, onStatus, onChange, onMaterials, onDuplicate, onAdd, onRemove, onGapChange, onRecalculate, onGoCut, onGoProducts }) {
   const products = data.products;
   const invalidItems = plan.issues.length;
   const sizeBreakdown = data.order.map(line => {
@@ -462,6 +478,7 @@ function ProductionPage({ data, plan, totalMeters, totalPieces, totalCost, onCha
         <div className="summary-foot"><BadgeCheck size={14} /> Cálculo estimado por heurística de acomodo 2D</div>
       </aside>
     </div>
+    <ProductionOrderOverview data={data} plan={plan} onRegister={onRegister} onStatus={onStatus} />
     <div className="production-bottom-grid"><div className="panel small-info-panel"><span className="info-badge sage"><Layers3 size={18} /></span><div><strong>{totalPieces} piezas calculadas</strong><small>Se cuentan repeticiones por unidad y talla.</small></div></div><div className="panel small-info-panel"><span className="info-badge blue"><Activity size={18} /></span><div><strong>{plan.groups.length} combinaciones de tela</strong><small>Cada tela y color obtiene su propio layout.</small></div></div><div className="panel small-info-panel"><span className="info-badge rose"><ArrowLeftRight size={18} /></span><div><strong>Rotación según dirección</strong><small>La tela direccional conserva el sentido.</small></div></div></div>
   </div>;
 }
@@ -600,7 +617,7 @@ function ProductEditor({ product, fabrics, unit, onClose, onSave }) {
       const m = piece.measures?.[source.id];
       return { ...piece, measures: { ...piece.measures, [newId]: m ? { length: Number((m.length * scale).toFixed(2)), width: Number((m.width * scale).toFixed(2)) } : { length: 40 * scale, width: 30 * scale }, ...(piece.measures ?? {}) }, materialsBySize: { ...piece.materialsBySize, ...(piece.materialsBySize?.[source.id] ? { [newId]: { ...piece.materialsBySize[source.id] } } : {}) } };
     });
-    setForm(prev => ({ ...prev, sizes: [...prev.sizes, { id: newId, name }], pieces })); setBaseSizeId(newId); setNewSizeName(''); setError('');
+    setForm(prev => ({ ...prev, sizes: [...prev.sizes, { id: newId, name }], pieces, ...(prev.costsBySize ? { costsBySize: { ...prev.costsBySize, [newId]: { ...prev.costsBySize[source.id] } } } : {}) })); setBaseSizeId(newId); setNewSizeName(''); setError('');
   };
   const removeSize = (sizeId) => {
     if (form.sizes.length <= 1) return setError('El producto necesita al menos una talla.');

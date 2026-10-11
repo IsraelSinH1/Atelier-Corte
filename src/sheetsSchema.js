@@ -39,7 +39,13 @@ export function columnName(count) { let name = ''; while (count) { count--; name
 export function toSheetTables(data, { revision = '', modifiedAt = '' } = {}) {
   const result = Object.fromEntries(Object.entries(SHEET_SCHEMA).map(([name, headers]) => [name, [[...headers]]]));
   const row = (name, values) => result[name].push(values.map(value => value ?? ''));
-  [['schema_version', 1], ['unidad', data.unit ?? 'cm'], ['separacion_cm', data.gap ?? 1], ['revision', revision], ['modificado_utc', modifiedAt], ['extra_json', extra(data, ['version', 'unit', 'gap', 'fabrics', 'products', 'order'])]].forEach(values => row('Configuracion', values));
+  [['schema_version', 1], ['unidad', data.unit ?? 'cm'], ['separacion_cm', data.gap ?? 1], ['revision', revision], ['modificado_utc', modifiedAt], ['extra_json', extra(data, ['version', 'unit', 'gap', 'fabrics', 'products', 'order', 'productionHistory'])]].forEach(values => row('Configuracion', values));
+  if (data.productionHistory != null) {
+    if (!Array.isArray(data.productionHistory)) throw new Error('El histórico de producción debe ser una lista.');
+    const content = JSON.stringify({ orders: data.productionHistory });
+    row('Configuracion', ['historial_recurso_id', 'production-history']);
+    for (let offset = 0, fragment = 0; offset < content.length; offset += 30000, fragment++) row('Recursos', ['production-history', fragment, content.slice(offset, offset + 30000)]);
+  }
   for (const f of data.fabrics) {
     row('Telas', [f.id, f.name, f.type, f.width, f.cost, !!f.directional, extra(f, ['id', 'name', 'type', 'width', 'cost', 'directional', 'colors'])]);
     for (const c of f.colors ?? []) row('Colores', [f.id, c.id, c.name, c.hex, extra(c, ['id', 'name', 'hex'])]);
@@ -85,6 +91,13 @@ export function fromSheetTables(tables) {
   const resources = new Map();
   for (const r of records.Recursos) { const order = number(r.fragmento, 'Recursos/fragmento'); if (!Number.isInteger(order) || order < 0) throw new Error('Fragmento de recurso inválido.'); unique(`Recursos/${r.recurso_id}`, String(order)); if (!resources.has(r.recurso_id)) resources.set(r.recurso_id, []); resources.get(r.recurso_id).push([order, String(r.contenido)]); }
   for (const chunks of resources.values()) { chunks.sort((a, b) => a[0] - b[0]); if (chunks.some(([order], i) => order !== i)) throw new Error('La miniatura está incompleta: faltan fragmentos en Recursos.'); }
+  if (config.historial_recurso_id) {
+    const chunks = resources.get(String(config.historial_recurso_id));
+    if (!chunks) throw new Error('Faltan los datos del histórico de producción en Recursos.');
+    const history = json(chunks.map(([, content]) => content).join(''), 'histórico de producción').orders;
+    if (!Array.isArray(history) || history.some(o => !o?.id || !o.summary || !Array.isArray(o.lines) || !Array.isArray(o.cuttingList))) throw new Error('Histórico de producción inválido.');
+    data.productionHistory = history;
+  }
   for (const r of records.Productos) {
     unique('Productos', r.producto_id); if (r.miniatura_recurso_id && !resources.has(r.miniatura_recurso_id)) throw new Error('Falta una miniatura en Recursos.');
     const p = { ...json(r.extra_json, 'Productos'), id: String(r.producto_id), name: String(r.nombre), description: String(r.descripcion), thumbnail: (resources.get(r.miniatura_recurso_id) ?? []).map(([, content]) => content).join(''), sizes: [], pieces: [] };
@@ -106,7 +119,7 @@ export function fromSheetTables(tables) {
   for (const p of data.products) for (const pc of p.pieces) for (const s of p.sizes) {
     if (!pc.measures[s.id]) throw new Error(`Faltan las medidas de ${pc.name} para la talla ${s.name}.`);
   }
-  return { data, empty: !data.fabrics.length && !data.products.length && !data.order.length, revision: String(config.revision || '') };
+  return { data, empty: !data.fabrics.length && !data.products.length && !data.order.length && !(data.productionHistory ?? []).length, revision: String(config.revision || '') };
 }
 
 export async function dataFingerprint(data) {

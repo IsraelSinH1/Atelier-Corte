@@ -663,6 +663,27 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   .bulk-material-actions .button { flex: 1 1 100px; }
 }
 
+.cost-overview { padding: 18px; margin-top: 16px; }
+.cost-overview > summary { cursor: pointer; color: #3e5446; font: 19px Georgia, serif; }
+.cost-overview-body { padding-top: 16px; }
+.cost-overview p { color: #818778; font-size: 11px; line-height: 1.7; }
+.cost-options { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin: 12px 0; }
+.cost-options .field { flex: 1 1 180px; }
+.cost-table-wrap { overflow-x: auto; }
+.cost-table { width: 100%; border-collapse: collapse; font-size: 11px; text-align: left; }
+.cost-table th, .cost-table td { padding: 10px; border-bottom: 1px solid #e5e7dd; white-space: nowrap; }
+.cost-table th { color: #596c5d; background: #f2f4ed; }
+.cost-table input { border: 1px solid #ddd; border-radius: 6px; padding: 7px; width: 85px; }
+.cost-table small { display: block; color: #818778; font-size: 10px; margin-top: 5px; }
+.cost-metrics { display: flex; flex-wrap: wrap; gap: 20px; padding: 15px 0; }
+.cost-metrics > span { color: #818778; font-size: 11px; }
+.cost-metrics strong { display: block; color: #3e5446; font-size: 19px; margin-top: 6px; }
+.history-record { padding: 14px 0; border-top: 1px solid #e5e7dd; }
+.history-record summary { font-size: 12px; color: #3e5446; cursor: pointer; }
+.history-record ul { font-size: 11px; color: #818778; }
+.history-record .field { max-width: 230px; }
+@media (max-width: 680px) { .cost-overview { padding: 12px; }.cost-options .field input, .cost-options .field select, .cost-table input { font-size: 14px; }.cost-metrics { gap: 15px; } }
+
 @media print {
   .cut-material-board, .cut-view-switch { display: none !important; }
   .cut-layouts-hidden { display: block !important; }
@@ -676,3 +697,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   .print-cut-list th, .print-cut-list td { text-align: left; padding: 6px 5px; border: 1px solid #d9d9d3; }
   .print-cut-list th { background: #eff2ec; color: #405345; }
 }
+
+.archived-layouts { display: grid; grid-template-columns: repeat(auto-fit,minmax(160px,1fr)); gap: 16px; margin: 16px 0; }
+.archived-layouts > div { padding: 12px; border: 1px solid #e5e7dd; border-radius: 8px; }
+.archived-layouts strong, .archived-layouts small { display: block; font-size: 11px; margin-bottom: 8px; }
+.archived-layouts svg { display: block; width: 100%; max-height: 360px; }

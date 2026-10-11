@@ -1,0 +1,41 @@
+import React, { useState } from 'react';
+import { compareBatch, estimate } from './productionOrders.js';
+import { parsePoints } from './optimizer.js';
+const money = v => v == null ? 'Pendiente' : `$${v.toLocaleString('es-MX', { maximumFractionDigits: 2, minimumFractionDigits: 2 })}`;
+const meters = v => v == null ? '—' : `${v.toFixed(2)} m`;
+
+function ArchivedLayouts({ layouts = [] }) {
+  return <div className="archived-layouts">{layouts.map((layout, i) => <div key={i}><strong>{layout.fabric} · {layout.color}</strong><small>{layout.width} cm de ancho · {meters(layout.length / 100)}</small><svg role="img" aria-label={`Corte archivado de ${layout.fabric}, ${layout.color}`} viewBox={`0 0 ${layout.width} ${Math.max(1, layout.length)}`} style={{ aspectRatio: `${layout.width} / ${Math.max(1, layout.length)}` }}><rect width={layout.width} height={layout.length} fill="#f3eee6" />{layout.placements.map(p => {
+    const props = { fill: p.fill, stroke: '#fffefa', strokeWidth: .5 };
+    const shape = p.shape === 'circle' ? <ellipse cx={p.x + p.width / 2} cy={p.y + p.height / 2} rx={p.width / 2} ry={p.height / 2} {...props} /> : p.shape === 'trapezoid' ? <polygon points={`${p.x + p.width * .18},${p.y} ${p.x + p.width * .82},${p.y} ${p.x + p.width},${p.y + p.height} ${p.x},${p.y + p.height}`} {...props} /> : p.shape === 'polygon' ? <polygon points={parsePoints(p.customPoints).map(([x,y]) => `${p.x + x*p.width},${p.y + y*p.height}`).join(' ')} {...props} /> : <rect x={p.x} y={p.y} width={p.width} height={p.height} {...props} />;
+    return <g key={p.id}>{shape}<text x={p.x+p.width/2} y={p.y+p.height/2} textAnchor="middle" fontSize="3" fill="#303934" paintOrder="stroke" stroke="#fffefa" strokeWidth=".5">{p.pieceName.slice(0,24)}</text><title>{p.productName} · {p.pieceName} · {p.sizeName}</title></g>;
+  })}</svg></div>)}</div>;
+}
+
+export function ProductCostOverview({ product, data, onCosts }) {
+  const [quantity, setQuantity] = useState(5);
+  const [designId, setDesignId] = useState('');
+  const designs = [...data.order.filter(l => l.productId === product.id), ...(data.productionHistory ?? []).flatMap(record => record.lines.filter(l => l.productId === product.id).map(l => ({ ...l, id: `${record.id}:${l.id}`, designName: `${record.folio} · ${l.designName || 'Diseño archivado'}` })))];
+  const design = designs.find(l => l.id === designId);
+  return <details className="panel cost-overview"><summary>Resumen de costos · {product.name}</summary><div className="cost-overview-body">
+    <div className="cost-options"><label className="field"><span>Materiales de referencia</span><select value={designId} onChange={e => setDesignId(e.target.value)}><option value="">Predeterminados del producto</option>{designs.map((l, i) => <option key={l.id} value={l.id}>{l.designName || `Diseño del pedido ${i + 1}`}</option>)}</select></label><label className="field"><span>Unidades para comparar</span><input type="number" min="1" step="1" value={quantity} onChange={e => setQuantity(Math.max(1, Math.floor(Number(e.target.value)) || 1))} /></label></div>
+    <p>Una unidad de cada talla se calcula por separado. El lote usa la misma talla y los mismos materiales. Importes en MXN; costos de fabricación estimados, sin margen de venta.</p>
+    <div className="cost-table-wrap"><table className="cost-table"><thead><tr><th>Talla</th><th>Tela / unidad</th><th>Costo tela</th><th>Costura / u.</th><th>Relleno / u.</th><th>Otros / u.</th><th>Total / unidad</th><th>Lote de {quantity}</th><th>Ahorro del lote</th></tr></thead><tbody>{product.sizes.map(size => {
+      const line = { ...(design || {}), id: `estimate-${size.id}`, productId: product.id, sizeId: size.id, quantity: 1 };
+      const solo = estimate(data, [line]); const batch = compareBatch(data, [{ ...line, quantity }]); const costs = product.costsBySize?.[size.id] || {};
+      return <tr key={size.id}><th>{size.name}</th><td>{meters(solo.meters)}</td><td>{money(solo.fabricCost)}</td>{['labor', 'fill', 'other'].map(key => <td key={key}><input aria-label={`${product.name}, ${size.name}: ${key === 'labor' ? 'costura' : key === 'fill' ? 'relleno' : 'otros'}`} type="number" min="0" step="0.01" value={costs[key] ?? ''} placeholder="0" onChange={e => onCosts(product.id, size.id, key, Math.max(0, Number(e.target.value) || 0))} /></td>)}<td>{money(solo.total)}</td><td>{money(batch.total)}<small>{money(batch.perUnit)} / u.</small></td><td>{money(batch.savings)}{!solo.valid && <small>Asigna materiales o revisa medidas</small>}</td></tr>;
+    })}</tbody></table></div><p>Los campos vacíos de costura, relleno y otros se consideran 0. Sin precio de tela, el total queda pendiente. El ahorro proviene del acomodo; no se presupone un descuento en costura. La heurística puede dar un lote menos eficiente: un ahorro negativo indica mayor costo.</p>
+  </div></details>;
+}
+
+export function ProductionOrderOverview({ data, plan, onRegister, onStatus }) {
+  const [name, setName] = useState(''); const [notes, setNotes] = useState(''); const [error, setError] = useState('');
+  const summary = compareBatch(data, data.order, plan);
+  return <section className="panel cost-overview order-history"><h3>Orden de producción</h3><div className="cost-metrics"><span>Unidades<strong>{summary.units}</strong></span><span>Cortar individualmente<strong>{money(summary.soloTotal)}</strong></span><span>Costo del lote<strong>{money(summary.total)}</strong></span><span>Promedio por unidad<strong>{money(summary.perUnit)}</strong></span><span>Ahorro del lote<strong>{money(summary.savings)}</strong></span></div>
+    <p>El promedio combina las tallas y diseños del pedido. Incluye tela y costos adicionales capturados en Productos. La estimación de costura por unidad se mantiene en el lote.</p>
+    <div className="cost-options"><label className="field"><span>Nombre de la orden</span><input value={name} onChange={e => setName(e.target.value)} placeholder="Ej. Primer lote de camas" /></label><label className="field"><span>Notas internas</span><input value={notes} onChange={e => setNotes(e.target.value)} placeholder="Entrega, armado o referencia" /></label><button className="button button-primary" disabled={!summary.valid} onClick={() => { try { onRegister({ name, notes }); setName(''); setNotes(''); setError(''); } catch(e) { setError(e.message); } }}>Pasar a producción</button></div>
+    <p>Al registrar, se guarda una copia de materiales, medidas, cantidades y costos y se vacía el borrador para preparar otro pedido. {summary.valid && !summary.priced ? 'Hay precios de tela pendientes; la orden se guardará sin costo total.' : !summary.valid ? 'Completa el pedido y resuelve sus alertas para registrar la orden.' : ''}</p>{error && <p role="alert">{error}</p>}
+    <h3>Histórico de órdenes</h3>{!(data.productionHistory ?? []).length && <p>Aún no hay órdenes registradas.</p>}
+    {[...(data.productionHistory ?? [])].reverse().map(record => <details className="history-record" key={record.id}><summary>{record.folio} · {record.name} · {record.summary.units} u. · {money(record.summary.total)} · {record.status === 'completed' ? 'Terminada' : record.status === 'cancelled' ? 'Cancelada' : 'En producción'}</summary><div><p>{new Date(record.createdAt).toLocaleString('es-MX')}{record.notes ? ` · ${record.notes}` : ''}</p><label className="field"><span>Estado</span><select value={record.status} onChange={e => onStatus(record.id, e.target.value)}><option value="production">En producción</option><option value="completed">Terminada</option><option value="cancelled">Cancelada</option></select></label><p>Metros: {meters(record.summary.meters)} · Ahorro calculado al registrar: {money(record.summary.savings)}</p><ul>{record.summary.materials.map((m, i) => <li key={i}>{m.fabric} · {m.color}: {meters(m.meters)} · {money(m.cost)}</li>)}</ul><ArchivedLayouts layouts={record.layouts} /><div className="cost-table-wrap"><table className="cost-table"><thead><tr><th>Producto</th><th>Diseño / talla</th><th>Pieza</th><th>Cantidad</th><th>Corte (cm)</th><th>Tela / color</th></tr></thead><tbody>{record.cuttingList.map((r, i) => <tr key={i}><td>{r.productName}</td><td>{r.designName} · {r.sizeName}</td><td>{r.pieceName}</td><td>{r.quantity}</td><td>{r.height} × {r.width}</td><td>{r.fabricName} · {r.colorName}</td></tr>)}</tbody></table></div></div></details>)}
+  </section>;
+}
