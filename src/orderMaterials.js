@@ -82,3 +82,62 @@ export function validateOrderMaterials(line) {
     }
   }
 }
+
+export const visualSectionKey = (lineId, pieceId, index) => JSON.stringify([lineId, pieceId, index]);
+
+export function commonMaterial(sections) {
+  if (!sections.length) return { fabricId: '', colorId: '' };
+  const fabricId = sections.every(s => s.material.fabricId === sections[0].material.fabricId) ? sections[0].material.fabricId || '' : '';
+  const colorId = fabricId && sections.every(s => s.material.colorId === sections[0].material.colorId) ? sections[0].material.colorId || '' : '';
+  return { fabricId, colorId };
+}
+
+// Includes unassigned pieces: the material board must exist before nesting.
+export function previewSections(products, fabrics, order) {
+  const sections = [];
+  for (const line of order) {
+    const product = products.find(p => p.id === line.productId);
+    const size = product?.sizes.find(s => s.id === line.sizeId);
+    if (!product || !size) continue;
+    for (const piece of product.pieces ?? []) {
+      if (!Number.isInteger(Number(piece.quantity)) || Number(piece.quantity) < 1) continue;
+      const m = piece.measures?.[size.id];
+      for (let index = 0; index < Number(piece.quantity); index++) {
+        const material = resolveMaterialIds(piece, size.id, line, index);
+        const fabric = fabrics.find(f => f.id === material.fabricId);
+        const color = fabric?.colors.find(c => c.id === material.colorId);
+        sections.push({ key: visualSectionKey(line.id, piece.id, index), lineId: line.id, pieceId: piece.id, index,
+          productName: product.name, sizeName: size.name, designName: line.designName || '', groupName: piece.materialGroup?.trim() || piece.name,
+          name: Number(piece.quantity) > 1 ? `${piece.name} · sección ${index + 1}` : piece.name,
+          shape: piece.shape, customPoints: piece.customPoints, width: Number(piece.shape === 'circle' ? m?.length : m?.width) || 0,
+          length: Number(m?.length) || 0, quantity: Number(line.quantity), material, fabric, color,
+          ready: Boolean(fabric && color && Number(m?.length) > 0 && (piece.shape === 'circle' || Number(m?.width) > 0)),
+        });
+      }
+    }
+  }
+  return sections;
+}
+
+// Independent batch edits are resolved per section, preserving untouched fields.
+// Validate all targets first so an invalid color never causes a partial update.
+export function patchSelectedSections(order, products, fabrics, targets, patch) {
+  const edits = [];
+  for (const target of targets) {
+    const line = order.find(o => o.id === target.lineId);
+    const piece = products.find(p => p.id === line?.productId)?.pieces.find(p => p.id === target.pieceId);
+    if (!line || !piece || !Number.isInteger(target.index) || target.index < 0 || target.index >= Number(piece.quantity)) throw new Error('La selección cambió. Vuelve a seleccionar las piezas.');
+    const current = resolveMaterialIds(piece, line.sizeId, line, target.index);
+    const fabricId = patch.fabricId ?? current.fabricId;
+    const fabric = fabrics.find(f => f.id === fabricId);
+    if (!fabric) throw new Error('Selecciona una tela disponible.');
+    const colorId = patch.colorId ?? (fabricId === current.fabricId ? current.colorId : '');
+    if (patch.colorId != null && !fabric.colors?.some(c => c.id === colorId)) throw new Error('El color debe pertenecer a la tela de todas las piezas seleccionadas. Asigna primero la tela.');
+    edits.push({ ...target, material: { fabricId, colorId } });
+  }
+  return order.map(line => {
+    let next = line;
+    for (const edit of edits) if (edit.lineId === line.id) next = assignSection(next, edit.pieceId, edit.index, edit.material);
+    return next;
+  });
+}
